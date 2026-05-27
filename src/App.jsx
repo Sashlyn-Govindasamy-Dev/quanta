@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNotes } from './hooks/useNotes.js'
 import { useNotifications } from './hooks/useNotifications.js'
+import { useAutoBackup } from './hooks/useAutoBackup.js'
 import { Sidebar } from './components/Sidebar.jsx'
 import { NoteView } from './components/NoteView.jsx'
 import { ReviewPanel } from './components/ReviewPanel.jsx'
@@ -23,6 +24,7 @@ const TABS = [
 export default function App() {
   const { notes, loading, addNote, updateNote, removeNote, rateRecall, addCapture, addConnection, removeConnection, reload } = useNotes()
   const { requestPermission } = useNotifications(notes)
+  const autoBackup = useAutoBackup()
   const toast = useToast()
 
   const [tab, setTab] = useState('notes')
@@ -35,6 +37,11 @@ export default function App() {
   useEffect(() => {
     if (notes.length && !activeNoteId) setActiveNoteId(notes[0].id)
   }, [notes.length])
+
+  // Trigger auto-backup on app open once notes are loaded
+  useEffect(() => {
+    if (notes.length) autoBackup.runAutoBackup(notes.length)
+  }, [notes.length > 0])
 
   // Prompt for notifications once
   useEffect(() => {
@@ -168,7 +175,7 @@ export default function App() {
           {tab === 'review' && <ReviewPanel notes={notes} onRate={rateRecall} />}
           {tab === 'graph' && <GraphPanel notes={notes} onSelectNote={handleSelectNote} />}
           {tab === 'capture' && <CapturePanel notes={notes} onAddNote={handleNewNote} onAddCapture={addCapture} onSelectNote={handleSelectNote} onSwitchTab={setTab} />}
-          {tab === 'progress' && <ProgressPanel notes={notes} onReload={reload} />}
+          {tab === 'progress' && <ProgressPanel notes={notes} onReload={reload} autoBackup={autoBackup} />}
         </main>
       </div>
 
