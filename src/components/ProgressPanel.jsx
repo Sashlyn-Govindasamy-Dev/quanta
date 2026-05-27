@@ -1,9 +1,9 @@
 import { getTopicColor, SOURCE_CONFIG } from '../config.js'
 import { getRetentionPercent, isDue } from '../srs.js'
-import { exportData, importData } from '../db.js'
+import { importData } from '../db.js'
 import { showToast } from './Toast.jsx'
 
-export function ProgressPanel({ notes, onReload }) {
+export function ProgressPanel({ notes, onReload, autoBackup }) {
   const total = notes.length
   const due = notes.filter(isDue).length
   const reviewed = notes.filter(n => n.lastReview).length
@@ -15,16 +15,6 @@ export function ProgressPanel({ notes, onReload }) {
   const sourceCounts = notes.reduce((acc, n) => {
     acc[n.source] = (acc[n.source] || 0) + 1; return acc
   }, {})
-
-  const handleExport = async () => {
-    const json = await exportData()
-    const blob = new Blob([json], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = `quanta-backup-${new Date().toISOString().slice(0, 10)}.json`
-    a.click(); URL.revokeObjectURL(url)
-    showToast('Backup downloaded!')
-  }
 
   const handleImport = () => {
     const input = document.createElement('input')
@@ -43,6 +33,8 @@ export function ProgressPanel({ notes, onReload }) {
     }
     input.click()
   }
+
+  const { supported, folderName, lastBackup, pickFolder, manualBackup } = autoBackup
 
   return (
     <div style={{ maxWidth: 680, padding: '24px 28px' }}>
@@ -121,17 +113,52 @@ export function ProgressPanel({ notes, onReload }) {
 
       {/* Data management */}
       <div style={{ borderTop: '0.5px solid var(--border)', paddingTop: 20 }}>
-        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
           Data management
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={handleExport} style={{
+
+        {/* Auto-backup status */}
+        <div style={{
+          padding: '12px 14px', borderRadius: 'var(--radius-md)', marginBottom: 14,
+          background: folderName ? 'var(--teal-50)' : 'var(--bg-secondary)',
+          border: `0.5px solid ${folderName ? 'var(--teal-200)' : 'var(--border)'}`,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <i className="ti ti-refresh" aria-hidden="true" style={{ fontSize: 14, color: folderName ? 'var(--teal-600)' : 'var(--text-tertiary)' }} />
+            <span style={{ fontSize: 13, fontWeight: 500, color: folderName ? 'var(--teal-800)' : 'var(--text-secondary)' }}>
+              {folderName ? `Auto-backup active → ${folderName}` : 'Auto-backup not configured'}
+            </span>
+          </div>
+          <div style={{ fontSize: 12, color: folderName ? 'var(--teal-600)' : 'var(--text-tertiary)', marginBottom: 10 }}>
+            {folderName
+              ? `Quanta backs up automatically each time you open the app. ${lastBackup ? `Last backup: ${lastBackup.toLocaleString()}` : 'No backup yet this session.'}`
+              : 'Choose a folder on your computer and Quanta will save a backup there every time you open the app.'}
+          </div>
+          {supported ? (
+            <button onClick={pickFolder} style={{
+              padding: '6px 14px', borderRadius: 'var(--radius-md)', fontSize: 12, fontWeight: 500,
+              background: folderName ? 'var(--teal-100)' : 'var(--purple-50)',
+              border: `0.5px solid ${folderName ? 'var(--teal-200)' : 'var(--purple-200)'}`,
+              color: folderName ? 'var(--teal-800)' : 'var(--purple-800)', cursor: 'pointer'
+            }}>
+              <i className="ti ti-folder" aria-hidden="true" style={{ marginRight: 6 }} />
+              {folderName ? 'Change folder' : 'Choose backup folder'}
+            </button>
+          ) : (
+            <p style={{ fontSize: 12, color: 'var(--coral-400)' }}>
+              Auto-backup requires Chrome or Edge. Use manual export below.
+            </p>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button onClick={manualBackup} style={{
             display: 'flex', alignItems: 'center', gap: 8, padding: '9px 18px',
             border: '0.5px solid var(--border-mid)', borderRadius: 'var(--radius-md)',
             background: 'transparent', fontSize: 13, color: 'var(--text-secondary)'
           }}>
             <i className="ti ti-download" aria-hidden="true" />
-            Export backup
+            {folderName ? 'Backup now' : 'Export backup'}
           </button>
           <button onClick={handleImport} style={{
             display: 'flex', alignItems: 'center', gap: 8, padding: '9px 18px',
@@ -143,7 +170,7 @@ export function ProgressPanel({ notes, onReload }) {
           </button>
         </div>
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 10 }}>
-          Your notes are stored locally in your browser's IndexedDB. Export regularly to back up your knowledge garden.
+          Your notes live in your browser's IndexedDB. Configure auto-backup above so you never lose your knowledge garden.
         </p>
       </div>
     </div>
