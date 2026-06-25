@@ -55,9 +55,33 @@ export async function setSetting(key, value) {
   return db.put('settings', { key, value })
 }
 
+// ── Custom sources ────────────────────────────────────────────────────────────
+const CUSTOM_SOURCES_KEY = 'customSources'
+
+export async function getCustomSources() {
+  const data = await getSetting(CUSTOM_SOURCES_KEY)
+  return data || {}
+}
+
+export async function saveCustomSource(key, label, icon) {
+  const existing = await getCustomSources()
+  existing[key] = { label, icon }
+  await setSetting(CUSTOM_SOURCES_KEY, existing)
+  return existing
+}
+
+export async function deleteCustomSource(key) {
+  const existing = await getCustomSources()
+  delete existing[key]
+  await setSetting(CUSTOM_SOURCES_KEY, existing)
+  return existing
+}
+
+// ── Backup / restore ──────────────────────────────────────────────────────────
 export async function exportData() {
   const notes = await getAllNotes()
-  return JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), notes }, null, 2)
+  const customSources = await getCustomSources()
+  return JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), notes, customSources }, null, 2)
 }
 
 export async function importData(jsonString) {
@@ -67,6 +91,10 @@ export async function importData(jsonString) {
   const tx = db.transaction('notes', 'readwrite')
   await Promise.all(data.notes.map(n => tx.store.put(n)))
   await tx.done
+  // Restore custom sources if present in backup
+  if (data.customSources) {
+    await setSetting(CUSTOM_SOURCES_KEY, data.customSources)
+  }
   return data.notes.length
 }
 
