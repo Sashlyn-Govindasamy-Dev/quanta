@@ -12,6 +12,8 @@ import { NewNoteModal } from './components/NewNoteModal.jsx'
 import { DueReviewBanner } from './components/DueReviewBanner.jsx'
 import { Toast, useToast } from './components/Toast.jsx'
 import { isDue } from './srs.js'
+import { buildSourceConfig } from './config.js'
+import { getCustomSources, saveCustomSource, deleteCustomSource } from './db.js'
 
 const TABS = [
   { id: 'notes',    icon: 'ti-notes',             label: 'Notes'    },
@@ -32,6 +34,24 @@ export default function App() {
   const [showNewNote, setShowNewNote] = useState(false)
   const [bannerDismissed, setBannerDismissed] = useState(false)
   const [notifPrompted, setNotifPrompted] = useState(false)
+  const [customSources, setCustomSources] = useState({})
+
+  // Load custom sources from IndexedDB
+  useEffect(() => {
+    getCustomSources().then(setCustomSources)
+  }, [])
+
+  const sourceConfig = buildSourceConfig(customSources)
+
+  const handleAddSource = async (key, label, icon) => {
+    const updated = await saveCustomSource(key, label, icon)
+    setCustomSources(updated)
+  }
+
+  const handleDeleteSource = async (key) => {
+    const updated = await deleteCustomSource(key)
+    setCustomSources(updated)
+  }
 
   // Set first note as active on load
   useEffect(() => {
@@ -156,6 +176,7 @@ export default function App() {
               ? <NoteView
                   note={activeNote}
                   notes={notes}
+                  sourceConfig={sourceConfig}
                   onUpdate={updateNote}
                   onAddCapture={addCapture}
                   onAddConnection={addConnection}
@@ -172,16 +193,17 @@ export default function App() {
                   }}>New note</button>
                 </div>
           )}
-          {tab === 'review' && <ReviewPanel notes={notes} onRate={rateRecall} />}
+          {tab === 'review' && <ReviewPanel notes={notes} sourceConfig={sourceConfig} onRate={rateRecall} />}
           {tab === 'graph' && <GraphPanel notes={notes} onSelectNote={handleSelectNote} />}
-          {tab === 'capture' && <CapturePanel notes={notes} onAddNote={handleNewNote} onAddCapture={addCapture} onSelectNote={handleSelectNote} onSwitchTab={setTab} />}
-          {tab === 'progress' && <ProgressPanel notes={notes} onReload={reload} autoBackup={autoBackup} />}
+          {tab === 'capture' && <CapturePanel notes={notes} sourceConfig={sourceConfig} onAddNote={handleNewNote} onAddCapture={addCapture} onSelectNote={handleSelectNote} onSwitchTab={setTab} />}
+          {tab === 'progress' && <ProgressPanel notes={notes} sourceConfig={sourceConfig} onAddSource={handleAddSource} onDeleteSource={handleDeleteSource} customSources={customSources} onReload={reload} autoBackup={autoBackup} />}
         </main>
       </div>
 
       {showNewNote && (
         <NewNoteModal
           existingTopics={topics}
+          sourceConfig={sourceConfig}
           onSave={handleNewNote}
           onClose={() => setShowNewNote(false)}
         />
