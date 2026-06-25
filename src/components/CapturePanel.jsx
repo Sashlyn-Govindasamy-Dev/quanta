@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { getTopicColor, SOURCE_CONFIG } from '../config.js'
+import { getTopicColor } from '../config.js'
 import { showToast } from './Toast.jsx'
 
-export function CapturePanel({ notes, onAddNote, onAddCapture, onSelectNote, onSwitchTab }) {
+export function CapturePanel({ notes, sourceConfig, onAddNote, onAddCapture, onSelectNote, onSwitchTab }) {
   const [text, setText] = useState('')
   const [source, setSource] = useState('thinking')
   const [topicMode, setTopicMode] = useState('existing')
@@ -65,7 +65,7 @@ export function CapturePanel({ notes, onAddNote, onAddCapture, onSelectNote, onS
 
         <div style={{ borderTop: '0.5px solid var(--purple-200)', marginTop: 12, paddingTop: 12 }}>
           <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            {Object.entries(SOURCE_CONFIG).map(([key, cfg]) => (
+            {Object.entries(sourceConfig).map(([key, cfg]) => (
               <button key={key} onClick={() => setSource(key)} style={{
                 padding: '5px 12px', borderRadius: 99, fontSize: 11, fontWeight: 500,
                 border: source === key ? '0.5px solid var(--purple-400)' : '0.5px solid var(--purple-200)',
