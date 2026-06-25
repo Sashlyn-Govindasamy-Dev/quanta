@@ -1,16 +1,16 @@
 import { useState } from 'react'
-import { getTopicColor, SOURCE_CONFIG } from '../config.js'
+import { getTopicColor } from '../config.js'
 import { getRetentionPercent, isDue, getDaysUntilReview } from '../srs.js'
 import { showToast } from './Toast.jsx'
 
-export function NoteView({ note, notes, onUpdate, onAddCapture, onAddConnection, onRemoveConnection, onDelete, onSwitchTab }) {
+export function NoteView({ note, notes, sourceConfig, onUpdate, onAddCapture, onAddConnection, onRemoveConnection, onDelete, onSwitchTab }) {
   const [editMode, setEditMode] = useState(false)
   const [editTitle, setEditTitle] = useState(note.title)
   const [editBody, setEditBody] = useState(note.body)
   const [showLinkPicker, setShowLinkPicker] = useState(false)
 
   const color = getTopicColor(note.topic)
-  const src = SOURCE_CONFIG[note.source] || SOURCE_CONFIG.thinking
+  const src = sourceConfig[note.source] || sourceConfig.thinking
   const retention = getRetentionPercent(note)
   const due = isDue(note)
   const daysUntil = getDaysUntilReview(note)
