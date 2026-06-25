@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { SOURCE_CONFIG } from '../config.js'
 
-export function NewNoteModal({ onSave, onClose, existingTopics }) {
+export function NewNoteModal({ onSave, onClose, existingTopics, sourceConfig }) {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [topic, setTopic] = useState(existingTopics[0] || '')
@@ -58,7 +57,7 @@ export function NewNoteModal({ onSave, onClose, existingTopics }) {
 
         <Field label="Source">
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {Object.entries(SOURCE_CONFIG).map(([key, cfg]) => (
+            {Object.entries(sourceConfig).map(([key, cfg]) => (
               <button key={key} onClick={() => setSource(key)} style={{
                 ...toggleBtn(source === key),
                 display: 'flex', alignItems: 'center', gap: 6
