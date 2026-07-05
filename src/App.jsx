@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNotes } from './hooks/useNotes.js'
 import { useNotifications } from './hooks/useNotifications.js'
 import { useAutoBackup } from './hooks/useAutoBackup.js'
@@ -62,6 +62,19 @@ export default function App() {
   useEffect(() => {
     if (notes.length) autoBackup.runAutoBackup(notes.length)
   }, [notes.length > 0])
+
+  // Backup on every note change (add/edit/review/capture/connection) —
+  // debounced 1.5s so rapid edits produce one write, skips the initial load
+  const notesInitializedRef = useRef(false)
+  useEffect(() => {
+    if (loading) return
+    if (!notesInitializedRef.current) {
+      notesInitializedRef.current = true
+      return
+    }
+    const t = setTimeout(() => autoBackup.backupOnChange(), 1500)
+    return () => clearTimeout(t)
+  }, [notes])
 
   // Prompt for notifications once
   useEffect(() => {
