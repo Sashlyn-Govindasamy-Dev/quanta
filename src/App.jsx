@@ -8,6 +8,7 @@ import { ReviewPanel } from './components/ReviewPanel.jsx'
 import { GraphPanel } from './components/GraphPanel.jsx'
 import { CapturePanel } from './components/CapturePanel.jsx'
 import { ProgressPanel } from './components/ProgressPanel.jsx'
+import { QuizPanel } from './components/QuizPanel.jsx'
 import { NewNoteModal } from './components/NewNoteModal.jsx'
 import { DueReviewBanner } from './components/DueReviewBanner.jsx'
 import { Toast, useToast } from './components/Toast.jsx'
@@ -18,6 +19,7 @@ import { getCustomSources, saveCustomSource, deleteCustomSource } from './db.js'
 const TABS = [
   { id: 'notes',    icon: 'ti-notes',             label: 'Notes'    },
   { id: 'review',   icon: 'ti-brain',             label: 'Review'   },
+  { id: 'quiz',     icon: 'ti-messages-question',  label: 'Quiz'     },
   { id: 'graph',    icon: 'ti-vector-triangle',   label: 'Graph'    },
   { id: 'capture',  icon: 'ti-bulb',              label: 'Capture'  },
   { id: 'progress', icon: 'ti-chart-line',        label: 'Progress' },
@@ -207,6 +209,7 @@ export default function App() {
                 </div>
           )}
           {tab === 'review' && <ReviewPanel notes={notes} sourceConfig={sourceConfig} onRate={rateRecall} />}
+          {tab === 'quiz' && <QuizPanel notes={notes} />}
           {tab === 'graph' && <GraphPanel notes={notes} onSelectNote={handleSelectNote} />}
           {tab === 'capture' && <CapturePanel notes={notes} sourceConfig={sourceConfig} onAddNote={handleNewNote} onAddCapture={addCapture} onSelectNote={handleSelectNote} onSwitchTab={setTab} />}
           {tab === 'progress' && <ProgressPanel notes={notes} sourceConfig={sourceConfig} onAddSource={handleAddSource} onDeleteSource={handleDeleteSource} customSources={customSources} onReload={reload} autoBackup={autoBackup} />}
