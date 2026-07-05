@@ -1,9 +1,11 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { exportData, getSetting, setSetting } from '../db.js'
 import { showToast } from '../components/Toast.jsx'
 
 const SETTING_KEY = 'autoBackupFolderName'
+const HANDLE_KEY = 'autoBackupDirHandle'
 const LAST_BACKUP_KEY = 'lastAutoBackup'
+const AUTOSAVE_FILENAME = 'quanta-autosave.json'
 
 // File System Access API — lets us write to a user-chosen folder silently after first pick
 export function useAutoBackup() {
@@ -11,14 +13,29 @@ export function useAutoBackup() {
   const [dirHandle, setDirHandle] = useState(null)
   const [lastBackup, setLastBackup] = useState(null)
   const [supported] = useState(() => 'showDirectoryPicker' in window)
+  const permissionWarnedRef = useRef(false)
 
-  // Load saved folder name and last backup time from IndexedDB on mount
+  // Load saved folder handle + metadata from IndexedDB on mount.
+  // Directory handles are structured-cloneable, so they survive app restarts —
+  // this means auto-backup keeps working across sessions without re-picking.
   useEffect(() => {
     async function load() {
       const name = await getSetting(SETTING_KEY)
       const last = await getSetting(LAST_BACKUP_KEY)
       if (name) setFolderName(name)
       if (last) setLastBackup(new Date(last))
+
+      const savedHandle = await getSetting(HANDLE_KEY)
+      if (savedHandle) {
+        try {
+          const perm = await savedHandle.queryPermission({ mode: 'readwrite' })
+          // 'granted' → ready to go. 'prompt' → we still keep the handle;
+          // the first user-initiated action will re-request permission.
+          if (perm === 'granted' || perm === 'prompt') setDirHandle(savedHandle)
+        } catch {
+          // Handle became invalid (folder moved/deleted) — user can re-pick
+        }
+      }
     }
     load()
   }, [])
@@ -31,6 +48,8 @@ export function useAutoBackup() {
       setDirHandle(handle)
       setFolderName(handle.name)
       await setSetting(SETTING_KEY, handle.name)
+      await setSetting(HANDLE_KEY, handle)
+      permissionWarnedRef.current = false
       showToast(`Backup folder set: ${handle.name}`, 'success')
       return true
     } catch (e) {
@@ -39,7 +58,15 @@ export function useAutoBackup() {
     }
   }, [supported])
 
-  // Write a backup file to the chosen folder
+  // Ensure we have readwrite permission on the handle (may prompt the user once)
+  const ensurePermission = useCallback(async (handle) => {
+    const perm = await handle.queryPermission({ mode: 'readwrite' })
+    if (perm === 'granted') return true
+    const req = await handle.requestPermission({ mode: 'readwrite' })
+    return req === 'granted'
+  }, [])
+
+  // Write a timestamped backup file to the chosen folder
   const writeBackup = useCallback(async (handle) => {
     const json = await exportData()
     const date = new Date().toISOString().slice(0, 10)
@@ -55,8 +82,35 @@ export function useAutoBackup() {
     return filename
   }, [])
 
-  // Auto-backup on app open — runs once when notes are loaded
-  // Only backs up if more than 1 hour has passed since last backup
+  // Write/overwrite the single rolling autosave file — used on every note change.
+  // One fixed filename means no file spam, always contains the latest state.
+  const writeRollingBackup = useCallback(async (handle) => {
+    const json = await exportData()
+    const fileHandle = await handle.getFileHandle(AUTOSAVE_FILENAME, { create: true })
+    const writable = await fileHandle.createWritable()
+    await writable.write(json)
+    await writable.close()
+    const now = new Date()
+    setLastBackup(now)
+    await setSetting(LAST_BACKUP_KEY, now.toISOString())
+  }, [])
+
+  // Called (debounced) after any note add/edit/review/capture/connection change
+  const backupOnChange = useCallback(async () => {
+    if (!dirHandle) return
+    try {
+      await writeRollingBackup(dirHandle)
+      // Silent on success — no toast spam while you're working
+    } catch (e) {
+      if (!permissionWarnedRef.current) {
+        permissionWarnedRef.current = true
+        showToast('Auto-backup paused — click "Backup now" in Progress to re-enable', 'error')
+      }
+      console.warn('Backup-on-save skipped:', e.message)
+    }
+  }, [dirHandle, writeRollingBackup])
+
+  // Auto-backup on app open — keeps the hourly timestamped snapshot behaviour
   const runAutoBackup = useCallback(async (notesCount) => {
     if (!dirHandle || !notesCount) return
 
@@ -67,7 +121,7 @@ export function useAutoBackup() {
     }
 
     try {
-      const filename = await writeBackup(dirHandle)
+      await writeBackup(dirHandle)
       showToast(`Auto-backup saved to ${dirHandle.name}`, 'success')
     } catch (e) {
       // Permission may have lapsed — silently skip, don't annoy the user
@@ -75,14 +129,12 @@ export function useAutoBackup() {
     }
   }, [dirHandle, writeBackup])
 
-  // Manual backup to chosen folder
+  // Manual backup to chosen folder — also re-establishes permission if it lapsed
   const manualBackup = useCallback(async () => {
     let handle = dirHandle
     if (!handle) {
       const picked = await pickFolder()
       if (!picked) return
-      // After picking, dirHandle is set via state — re-read from window
-      // We trigger a manual download fallback for this first time
       const json = await exportData()
       const blob = new Blob([json], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
@@ -95,12 +147,15 @@ export function useAutoBackup() {
       return
     }
     try {
+      const ok = await ensurePermission(handle)
+      if (!ok) { showToast('Permission denied — try re-selecting the folder', 'error'); return }
+      permissionWarnedRef.current = false
       const filename = await writeBackup(handle)
       showToast(`Saved: ${filename}`)
     } catch (e) {
       showToast('Backup failed — try re-selecting the folder', 'error')
     }
-  }, [dirHandle, pickFolder, writeBackup])
+  }, [dirHandle, pickFolder, writeBackup, ensurePermission])
 
   return {
     supported,
@@ -109,6 +164,7 @@ export function useAutoBackup() {
     pickFolder,
     manualBackup,
     runAutoBackup,
+    backupOnChange,
     dirHandle
   }
 }
