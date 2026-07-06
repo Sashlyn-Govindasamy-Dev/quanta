@@ -1,25 +1,43 @@
 import { useState, useEffect } from 'react'
 import { getTopicColor } from '../config.js'
 import { getSetting, setSetting } from '../db.js'
-import { generateQuestion, evaluateAnswer, pickQuestionType } from '../ai.js'
+import { generateQuestion, evaluateAnswer, pickQuestionType, generateCertQuestion, evaluateCertAnswer } from '../ai.js'
+import { applyQuizResult } from '../srs.js'
 import { showToast } from './Toast.jsx'
 
 const TYPE_META = {
-  recall:      { label: 'Recall',      icon: 'ti-brain',            desc: 'Do you remember it?' },
-  application: { label: 'Application', icon: 'ti-tool',             desc: 'Can you use it?' },
-  feynman:     { label: 'Feynman',     icon: 'ti-school',           desc: 'Can you teach it?' },
-  connection:  { label: 'Connection',  icon: 'ti-vector-triangle',  desc: 'How does it relate?' },
+  recall:      { label: 'Recall',        icon: 'ti-brain',            desc: 'Do you remember it?' },
+  application: { label: 'Application',   icon: 'ti-tool',             desc: 'Can you use it?' },
+  feynman:     { label: 'Feynman',       icon: 'ti-school',           desc: 'Can you teach it?' },
+  connection:  { label: 'Connection',    icon: 'ti-vector-triangle',  desc: 'How does it relate?' },
+  cert:        { label: 'Cert scenario', icon: 'ti-certificate',      desc: 'Combine concepts to solve it' },
 }
 
-export function QuizPanel({ notes }) {
+// Record a quiz answer into daily session history (for streaks + Progress view)
+async function recordSession(score) {
+  const sessions = (await getSetting('quizSessions')) || []
+  const today = new Date().toISOString().slice(0, 10)
+  const existing = sessions.find(s => s.date === today)
+  if (existing) {
+    existing.count += 1
+    existing.totalScore += score
+  } else {
+    sessions.push({ date: today, count: 1, totalScore: score })
+  }
+  await setSetting('quizSessions', sessions.slice(-90)) // keep ~3 months
+}
+
+export function QuizPanel({ notes, onQuizScore }) {
   const [apiKey, setApiKey] = useState(null)
   const [keyInput, setKeyInput] = useState('')
   const [keyLoaded, setKeyLoaded] = useState(false)
 
+  const [mode, setMode] = useState('standard') // standard | cert
   const [topicFilter, setTopicFilter] = useState('all')
   const [question, setQuestion] = useState(null)
   const [answer, setAnswer] = useState('')
   const [feedback, setFeedback] = useState(null)
+  const [scheduleMsg, setScheduleMsg] = useState(null)
   const [phase, setPhase] = useState('idle') // idle | generating | answering | evaluating | feedback
   const [sessionScores, setSessionScores] = useState([])
   const [error, setError] = useState(null)
@@ -45,17 +63,34 @@ export function QuizPanel({ notes }) {
     showToast('API key removed')
   }
 
+  // Pick 2-3 related notes for a cert scenario: a seed note plus its
+  // connections, topped up with same-topic notes if needed
+  const pickCertNotes = (pool) => {
+    const seed = pool[Math.floor(Math.random() * pool.length)]
+    const related = notes.filter(n => seed.connections.includes(n.id))
+    const sameTopic = notes.filter(n => n.topic === seed.topic && n.id !== seed.id && !seed.connections.includes(n.id))
+    const combined = [seed, ...related, ...sameTopic].slice(0, 3)
+    return combined
+  }
+
   const nextQuestion = async () => {
     const pool = topicFilter === 'all' ? notes : notes.filter(n => n.topic === topicFilter)
     if (!pool.length) { showToast('No notes in this topic yet', 'error'); return }
+    if (mode === 'cert' && notes.length < 2) { showToast('Cert mode needs at least 2 notes', 'error'); return }
 
-    setPhase('generating'); setError(null); setFeedback(null); setAnswer('')
+    setPhase('generating'); setError(null); setFeedback(null); setAnswer(''); setScheduleMsg(null)
     try {
-      const note = pool[Math.floor(Math.random() * pool.length)]
-      const connected = notes.filter(n => note.connections.includes(n.id))
-      const type = pickQuestionType(connected.length > 0)
-      const q = await generateQuestion(apiKey, note, connected, type)
-      setQuestion({ ...q, note })
+      if (mode === 'cert') {
+        const certNotes = pickCertNotes(pool)
+        const q = await generateCertQuestion(apiKey, certNotes)
+        setQuestion({ ...q, notes: certNotes, note: certNotes[0] })
+      } else {
+        const note = pool[Math.floor(Math.random() * pool.length)]
+        const connected = notes.filter(n => note.connections.includes(n.id))
+        const type = pickQuestionType(connected.length > 0)
+        const q = await generateQuestion(apiKey, note, connected, type)
+        setQuestion({ ...q, note, notes: [note] })
+      }
       setPhase('answering')
     } catch (e) {
       setError(e.message); setPhase('idle')
@@ -66,9 +101,28 @@ export function QuizPanel({ notes }) {
     if (!answer.trim()) return
     setPhase('evaluating'); setError(null)
     try {
-      const result = await evaluateAnswer(apiKey, question.note, question, answer.trim())
+      const result = question.type === 'cert'
+        ? await evaluateCertAnswer(apiKey, question.notes, question, answer.trim())
+        : await evaluateAnswer(apiKey, question.note, question, answer.trim())
+
       setFeedback(result)
       setSessionScores(prev => [...prev, result.score])
+      await recordSession(result.score)
+
+      // Feed the score into the review schedule for every note involved
+      const msgs = []
+      for (const n of question.notes) {
+        const adj = applyQuizResult(n, result.score)
+        onQuizScore(n.id, result.score, question.type)
+        if (adj) {
+          const days = adj.interval
+          msgs.push(`${n.title} → next review ${days === 1 ? 'tomorrow' : `in ${days} days`}`)
+        }
+      }
+      setScheduleMsg(msgs.length
+        ? `Review schedule updated: ${msgs.join(' · ')}`
+        : 'Solid result — review schedule unchanged.')
+
       setPhase('feedback')
     } catch (e) {
       setError(e.message); setPhase('answering')
@@ -131,9 +185,40 @@ export function QuizPanel({ notes }) {
           </button>
         </div>
       </div>
-      <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>
+      <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
         Answer in as much detail as you can — the evaluation rewards completeness and flags exactly what you missed.
+        Results feed back into your review schedule automatically.
       </p>
+
+      {/* Mode toggle */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+        <button onClick={() => setMode('standard')} style={{
+          display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+          borderRadius: 'var(--radius-md)', fontSize: 12, fontWeight: 500,
+          border: mode === 'standard' ? '0.5px solid var(--purple-400)' : '0.5px solid var(--border)',
+          background: mode === 'standard' ? 'var(--purple-50)' : 'transparent',
+          color: mode === 'standard' ? 'var(--purple-800)' : 'var(--text-secondary)'
+        }}>
+          <i className="ti ti-brain" aria-hidden="true" style={{ fontSize: 13 }} />
+          Standard
+        </button>
+        <button onClick={() => setMode('cert')} style={{
+          display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+          borderRadius: 'var(--radius-md)', fontSize: 12, fontWeight: 500,
+          border: mode === 'cert' ? '0.5px solid var(--purple-400)' : '0.5px solid var(--border)',
+          background: mode === 'cert' ? 'var(--purple-50)' : 'transparent',
+          color: mode === 'cert' ? 'var(--purple-800)' : 'var(--text-secondary)'
+        }}>
+          <i className="ti ti-certificate" aria-hidden="true" style={{ fontSize: 13 }} />
+          Cert scenario
+        </button>
+      </div>
+
+      {mode === 'cert' && (
+        <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 14 }}>
+          Certification-style scenarios combining 2-3 related concepts — the way real exam questions test you.
+        </p>
+      )}
 
       {/* Topic filter */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 20 }}>
@@ -166,11 +251,11 @@ export function QuizPanel({ notes }) {
         </button>
       )}
 
-      {/* Generating */}
+      {/* Generating / evaluating */}
       {(phase === 'generating' || phase === 'evaluating') && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '20px 0', color: 'var(--text-tertiary)', fontSize: 13 }}>
           <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--purple-400)', animation: 'pulse 1s infinite' }} />
-          {phase === 'generating' ? 'Generating question from your notes...' : 'Evaluating your answer...'}
+          {phase === 'generating' ? (mode === 'cert' ? 'Building a scenario from your related notes...' : 'Generating question from your notes...') : 'Evaluating your answer...'}
           <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
         </div>
       )}
@@ -181,11 +266,21 @@ export function QuizPanel({ notes }) {
           borderRadius: 'var(--radius-lg)', border: '0.5px solid var(--border)',
           background: 'var(--bg-secondary)', padding: '20px 22px', marginBottom: 16
         }}>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
-            <span style={{
-              fontSize: 11, padding: '3px 9px', borderRadius: 99, fontWeight: 500,
-              background: color.bg, color: color.text
-            }}>{question.note.topic}</span>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            {question.type === 'cert' ? (
+              question.notes.map(n => {
+                const c = getTopicColor(n.topic)
+                return <span key={n.id} style={{
+                  fontSize: 11, padding: '3px 9px', borderRadius: 99, fontWeight: 500,
+                  background: c.bg, color: c.text
+                }}>{n.title}</span>
+              })
+            ) : (
+              <span style={{
+                fontSize: 11, padding: '3px 9px', borderRadius: 99, fontWeight: 500,
+                background: color.bg, color: color.text
+              }}>{question.note.topic}</span>
+            )}
             <span style={{
               fontSize: 11, padding: '3px 9px', borderRadius: 99, fontWeight: 500,
               background: 'var(--purple-50)', color: 'var(--purple-800)',
@@ -242,7 +337,7 @@ export function QuizPanel({ notes }) {
       {phase === 'feedback' && feedback && (
         <div>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16,
+            display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12,
             padding: '16px 20px', borderRadius: 'var(--radius-lg)',
             background: feedback.score >= 75 ? 'var(--teal-50)' : feedback.score >= 50 ? 'var(--amber-50)' : 'var(--coral-50)',
             border: `0.5px solid ${feedback.score >= 75 ? 'var(--teal-200)' : feedback.score >= 50 ? 'var(--amber-100)' : 'var(--coral-100)'}`
@@ -259,12 +354,38 @@ export function QuizPanel({ notes }) {
             </div>
           </div>
 
+          {scheduleMsg && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16,
+              padding: '9px 14px', borderRadius: 'var(--radius-md)',
+              background: 'var(--blue-50)', fontSize: 12.5, color: 'var(--blue-800)'
+            }}>
+              <i className="ti ti-calendar-stats" aria-hidden="true" style={{ fontSize: 14, flexShrink: 0 }} />
+              {scheduleMsg}
+            </div>
+          )}
+
+          {feedback.noteWarning && (
+            <div style={{
+              display: 'flex', gap: 8, marginBottom: 16,
+              padding: '11px 14px', borderRadius: 'var(--radius-md)',
+              background: 'var(--coral-50)', border: '0.5px solid var(--coral-100)',
+              fontSize: 13, color: 'var(--coral-800)', lineHeight: 1.7
+            }}>
+              <i className="ti ti-alert-octagon" aria-hidden="true" style={{ fontSize: 15, flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <strong>Your note may contain an error:</strong> {feedback.noteWarning}
+                <br />Open the note and run a sense check before your next review.
+              </div>
+            </div>
+          )}
+
           <FeedbackBlock icon="ti-check" title="What you got right" color="var(--teal-600)">{feedback.strengths}</FeedbackBlock>
           <FeedbackBlock icon="ti-alert-triangle" title="Gaps" color="var(--amber-400)">{feedback.gaps}</FeedbackBlock>
           {feedback.feynmanNote && (
             <FeedbackBlock icon="ti-school" title="Explanation quality (Feynman)" color="var(--purple-600)">{feedback.feynmanNote}</FeedbackBlock>
           )}
-          <FeedbackBlock icon="ti-bulb" title="Model answer from your note" color="var(--blue-400)">{feedback.modelAnswer}</FeedbackBlock>
+          <FeedbackBlock icon="ti-bulb" title="Model answer from your notes" color="var(--blue-400)">{feedback.modelAnswer}</FeedbackBlock>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
             <button onClick={nextQuestion} style={{
