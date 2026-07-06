@@ -42,3 +42,30 @@ export function getDaysUntilReview(note) {
   const ms = note.nextReview - Date.now()
   return Math.ceil(ms / 86400000)
 }
+
+// Quiz→SRS feedback: a quiz is one signal, not a full review, so this is
+// asymmetric on purpose — poor scores pull the review forward aggressively,
+// strong scores extend only modestly. Returns null when no change is needed.
+// Deliberately does NOT touch lastReview (that belongs to real reviews).
+export function applyQuizResult(note, score) {
+  let { interval, ease } = note
+
+  if (score < 50) {
+    interval = 1
+    ease = Math.max(1.3, ease - 0.2)
+  } else if (score < 70) {
+    interval = Math.max(1, Math.round(interval * 0.5))
+    ease = Math.max(1.3, ease - 0.1)
+  } else if (score < 90) {
+    return null // solid answer — current schedule already reflects this
+  } else {
+    interval = Math.max(1, Math.round(interval * 1.15))
+    ease = Math.min(3.0, ease + 0.05)
+  }
+
+  return {
+    interval,
+    ease,
+    nextReview: Date.now() + interval * 86400000
+  }
+}
