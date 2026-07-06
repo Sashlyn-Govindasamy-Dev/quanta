@@ -26,7 +26,7 @@ const TABS = [
 ]
 
 export default function App() {
-  const { notes, loading, addNote, updateNote, removeNote, rateRecall, addCapture, addConnection, removeConnection, reload } = useNotes()
+  const { notes, loading, addNote, updateNote, removeNote, rateRecall, addCapture, addConnection, removeConnection, applyQuizScore, reload } = useNotes()
   const { requestPermission } = useNotifications(notes)
   const autoBackup = useAutoBackup()
   const toast = useToast()
@@ -209,7 +209,7 @@ export default function App() {
                 </div>
           )}
           {tab === 'review' && <ReviewPanel notes={notes} sourceConfig={sourceConfig} onRate={rateRecall} />}
-          {tab === 'quiz' && <QuizPanel notes={notes} />}
+          {tab === 'quiz' && <QuizPanel notes={notes} onQuizScore={applyQuizScore} />}
           {tab === 'graph' && <GraphPanel notes={notes} onSelectNote={handleSelectNote} />}
           {tab === 'capture' && <CapturePanel notes={notes} sourceConfig={sourceConfig} onAddNote={handleNewNote} onAddCapture={addCapture} onSelectNote={handleSelectNote} onSwitchTab={setTab} />}
           {tab === 'progress' && <ProgressPanel notes={notes} sourceConfig={sourceConfig} onAddSource={handleAddSource} onDeleteSource={handleDeleteSource} customSources={customSources} onReload={reload} autoBackup={autoBackup} />}
