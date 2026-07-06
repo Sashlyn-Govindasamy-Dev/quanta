@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getAllNotes, saveNote, deleteNote, getSetting, setSetting, SEED_NOTES } from '../db.js'
-import { calculateNextReview } from '../srs.js'
+import { calculateNextReview, applyQuizResult } from '../srs.js'
 
 export function useNotes() {
   const [notes, setNotes] = useState([])
@@ -37,8 +37,11 @@ export function useNotes() {
   }, [])
 
   const updateNote = useCallback(async (id, updates) => {
+    // Content edits mark the note as modified (used to flag stale sense checks)
+    const isContentEdit = 'title' in updates || 'body' in updates
+    const stamped = isContentEdit ? { ...updates, modified: Date.now() } : updates
     setNotes(prev => {
-      const updated = prev.map(n => n.id === id ? { ...n, ...updates } : n)
+      const updated = prev.map(n => n.id === id ? { ...n, ...stamped } : n)
       const note = updated.find(n => n.id === id)
       if (note) saveNote(note)
       return updated
@@ -72,7 +75,7 @@ export function useNotes() {
   const addCapture = useCallback(async (noteId, text) => {
     setNotes(prev => {
       const updated = prev.map(n =>
-        n.id === noteId ? { ...n, captures: [...n.captures, text] } : n
+        n.id === noteId ? { ...n, captures: [...n.captures, text], modified: Date.now() } : n
       )
       const note = updated.find(n => n.id === noteId)
       if (note) saveNote(note)
@@ -106,11 +109,28 @@ export function useNotes() {
     })
   }, [])
 
+  // Record a quiz result on a note: appends to its quiz history and
+  // (conservatively) adjusts the review schedule based on the score
+  const applyQuizScore = useCallback(async (id, score, type) => {
+    setNotes(prev => {
+      const note = prev.find(n => n.id === id)
+      if (!note) return prev
+      const srsUpdate = applyQuizResult(note, score)
+      const entry = { date: Date.now(), score, type }
+      const quizHistory = [...(note.quizHistory || []), entry].slice(-10)
+      const updates = srsUpdate ? { ...srsUpdate, quizHistory } : { quizHistory }
+      const updated = prev.map(n => n.id === id ? { ...n, ...updates } : n)
+      saveNote(updated.find(n => n.id === id))
+      return updated
+    })
+  }, [])
+
   return {
     notes, loading,
     addNote, updateNote, removeNote,
     rateRecall, addCapture,
     addConnection, removeConnection,
+    applyQuizScore,
     reload: load
   }
 }
