@@ -104,15 +104,24 @@ export function NoteView({ note, notes, sourceConfig, onUpdate, onAddCapture, on
           </span>
 
           {report && (
-            <button onClick={() => setReportOpen(!reportOpen)} title="View sense check report" style={{
-              fontSize: 11, padding: '3px 9px', borderRadius: 99, fontWeight: 500, border: 'none',
-              background: report.verdict === 'accurate' ? 'var(--teal-50)' : report.verdict === 'minor_issues' ? 'var(--amber-50)' : 'var(--coral-50)',
-              color: report.verdict === 'accurate' ? 'var(--teal-800)' : report.verdict === 'minor_issues' ? 'var(--amber-800)' : 'var(--coral-800)',
-              cursor: 'pointer'
-            }}>
-              {report.verdict === 'accurate' ? '✓ Checked' : report.verdict === 'minor_issues' ? '⚠ Minor issues' : '✗ Issues found'}
-              {' · '}{new Date(report.checkedAt).toLocaleDateString()}
-            </button>
+            note.modified && note.modified > report.checkedAt ? (
+              <button onClick={() => setReportOpen(!reportOpen)} title="Note edited since last check — run another sense check to re-verify" style={{
+                fontSize: 11, padding: '3px 9px', borderRadius: 99, fontWeight: 500, border: 'none',
+                background: 'var(--purple-50)', color: 'var(--purple-800)', cursor: 'pointer'
+              }}>
+                ⟳ Edited since check — re-check?
+              </button>
+            ) : (
+              <button onClick={() => setReportOpen(!reportOpen)} title="View sense check report" style={{
+                fontSize: 11, padding: '3px 9px', borderRadius: 99, fontWeight: 500, border: 'none',
+                background: report.verdict === 'accurate' ? 'var(--teal-50)' : report.verdict === 'minor_issues' ? 'var(--amber-50)' : 'var(--coral-50)',
+                color: report.verdict === 'accurate' ? 'var(--teal-800)' : report.verdict === 'minor_issues' ? 'var(--amber-800)' : 'var(--coral-800)',
+                cursor: 'pointer'
+              }}>
+                {report.verdict === 'accurate' ? '✓ Checked' : report.verdict === 'minor_issues' ? '⚠ Minor issues' : '✗ Issues found'}
+                {' · '}{new Date(report.checkedAt).toLocaleDateString()}
+              </button>
+            )
           )}
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
@@ -229,8 +238,26 @@ export function NoteView({ note, notes, sourceConfig, onUpdate, onAddCapture, on
               </div>
             )}
 
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button onClick={() => { setEditMode(true); setEditTitle(note.title); setEditBody(note.body) }} style={{
+                padding: '7px 16px', borderRadius: 'var(--radius-md)', fontSize: 12.5, fontWeight: 500,
+                background: 'var(--purple-600)', color: '#fff', border: 'none'
+              }}>
+                <i className="ti ti-edit" aria-hidden="true" style={{ marginRight: 6 }} />
+                Edit note now
+              </button>
+              <button onClick={runSenseCheck} disabled={checking} style={{
+                padding: '7px 16px', borderRadius: 'var(--radius-md)', fontSize: 12.5, fontWeight: 500,
+                background: 'transparent', border: '0.5px solid var(--purple-200)', color: 'var(--purple-800)',
+                cursor: checking ? 'wait' : 'pointer'
+              }}>
+                <i className="ti ti-refresh" aria-hidden="true" style={{ marginRight: 6 }} />
+                Check again
+              </button>
+            </div>
+
             <p style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 12, lineHeight: 1.6 }}>
-              Read the findings, then edit your note yourself — correcting it in your own words is part of the learning. This check reduces error risk but isn't a guarantee; for version- or licence-specific claims, the linked docs are the source of truth.
+              Read the findings, then edit your note yourself — correcting it in your own words is part of the learning. Re-check as many times as you need until you're satisfied. This check reduces error risk but isn't a guarantee; for version- or licence-specific claims, the linked docs are the source of truth.
             </p>
           </div>
         </div>
