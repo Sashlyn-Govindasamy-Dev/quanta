@@ -66,7 +66,7 @@ ${connectedNotes.length ? `\nCONNECTED CONCEPTS: ${connectedNotes.map(n => n.tit
 
 // Evaluate the user's free-text answer against their own note
 export async function evaluateAnswer(apiKey, note, question, userAnswer) {
-  const system = `You are a rigorous but encouraging study coach evaluating a learner's answer against THEIR OWN study note. Hold them to the standard of their own note content. Respond ONLY with valid JSON, no markdown fences. Schema: {"score": number (0-100), "strengths": string, "gaps": string, "modelAnswer": string, "feynmanNote": string|null}.
+  const system = `You are a rigorous but encouraging study coach evaluating a learner's answer against THEIR OWN study note. Hold them to the standard of their own note content. Respond ONLY with valid JSON, no markdown fences. Schema: {"score": number (0-100), "strengths": string, "gaps": string, "modelAnswer": string, "feynmanNote": string|null, "noteWarning": string|null}.
 
 Rules:
 - "score": factual accuracy AND completeness vs the note. Missing a key constraint or detail from the note lowers the score.
@@ -74,6 +74,7 @@ Rules:
 - "gaps": exactly what was missing or wrong, referencing what their note says. If nothing, say so.
 - "modelAnswer": a strong answer built from THEIR note content, in 2-4 sentences.
 - "feynmanNote": ONLY for feynman-type questions — assess explanation quality separately: did they use plain language? Did unexplained jargon slip in? Was there an analogy? For other types, null.
+- "noteWarning": if the NOTE ITSELF appears to contain a factual error (not just the learner's answer), briefly describe the suspected error and recommend running a sense check on the note. Use only for likely factual errors, never for style or brevity. Otherwise null.
 - Be direct. Do not inflate scores. A vague answer that gestures at the idea without specifics scores 40-60.`
 
   const userContent = `QUESTION TYPE: ${question.type}
@@ -156,4 +157,40 @@ ${note.captures.length ? `\nUSER'S PERSONAL INSIGHTS (mental models — see rule
   const jsonStart = clean.indexOf('{')
   if (jsonStart === -1) throw new Error('Unexpected response format — try again')
   return JSON.parse(clean.slice(jsonStart))
+}
+
+
+// ── Cert exam mode ────────────────────────────────────────────────────────────
+// Generates a certification-style scenario question spanning multiple related
+// notes — closer to how real Salesforce cert exams combine concepts.
+
+export async function generateCertQuestion(apiKey, notesArr) {
+  const system = `You write Salesforce certification-style exam questions for a learner preparing for Data Cloud / Marketing Cloud certifications. Generate ONE scenario-based question that requires COMBINING the concepts from the notes provided — a realistic business situation where the learner must reason across multiple concepts to answer, exactly like real cert exam scenario questions. The answer must be derivable from the notes' content. Respond ONLY with valid JSON, no markdown fences: {"question": string, "hint": string}. The hint nudges toward which concepts to combine, never the answer.`
+
+  const userContent = notesArr.map((n, i) => `NOTE ${i + 1} — ${n.title} (${n.topic}):\n${n.body}`).join('\n\n')
+
+  const result = await callClaude(apiKey, system, userContent, 600)
+  return { ...result, type: 'cert' }
+}
+
+export async function evaluateCertAnswer(apiKey, notesArr, question, userAnswer) {
+  const system = `You are a rigorous but encouraging study coach evaluating a learner's answer to a certification-style scenario question. The source of truth is the learner's own study notes provided below. Respond ONLY with valid JSON, no markdown fences. Schema: {"score": number (0-100), "strengths": string, "gaps": string, "modelAnswer": string, "feynmanNote": null, "noteWarning": string|null}.
+
+Rules:
+- "score": did they correctly combine the concepts to resolve the scenario? Missing a concept the scenario required lowers the score substantially.
+- "strengths": which concepts they applied correctly, be specific.
+- "gaps": which concepts they missed or misapplied, referencing what their notes say.
+- "modelAnswer": a strong scenario answer built from their notes, 3-5 sentences.
+- "noteWarning": if any NOTE ITSELF appears to contain a factual error, briefly describe it and recommend a sense check. Otherwise null.
+- Be direct. Do not inflate scores.`
+
+  const userContent = `SCENARIO QUESTION: ${question.question}
+
+THE LEARNER'S NOTES (source of truth):
+${notesArr.map((n, i) => `NOTE ${i + 1} — ${n.title} (${n.topic}):\n${n.body}`).join('\n\n')}
+
+THE LEARNER'S ANSWER:
+${userAnswer}`
+
+  return callClaude(apiKey, system, userContent, 1200)
 }
