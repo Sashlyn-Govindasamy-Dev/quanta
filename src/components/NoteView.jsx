@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { getTopicColor } from '../config.js'
 import { getRetentionPercent, isDue, getDaysUntilReview } from '../srs.js'
+import { getSetting } from '../db.js'
+import { senseCheckNote } from '../ai.js'
 import { showToast } from './Toast.jsx'
 
 export function NoteView({ note, notes, sourceConfig, onUpdate, onAddCapture, onAddConnection, onRemoveConnection, onDelete, onSwitchTab }) {
@@ -8,6 +10,29 @@ export function NoteView({ note, notes, sourceConfig, onUpdate, onAddCapture, on
   const [editTitle, setEditTitle] = useState(note.title)
   const [editBody, setEditBody] = useState(note.body)
   const [showLinkPicker, setShowLinkPicker] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
+
+  const report = note.senseCheck || null
+
+  const runSenseCheck = async () => {
+    const apiKey = await getSetting('anthropicApiKey')
+    if (!apiKey) {
+      showToast('Set up your API key in the Quiz tab first', 'error')
+      return
+    }
+    setChecking(true)
+    try {
+      const result = await senseCheckNote(apiKey, note)
+      onUpdate(note.id, { senseCheck: { ...result, checkedAt: Date.now() } })
+      setReportOpen(true)
+      showToast('Sense check complete')
+    } catch (e) {
+      showToast(e.message, 'error')
+    } finally {
+      setChecking(false)
+    }
+  }
 
   const color = getTopicColor(note.topic)
   const src = sourceConfig[note.source] || sourceConfig.thinking
@@ -78,7 +103,23 @@ export function NoteView({ note, notes, sourceConfig, onUpdate, onAddCapture, on
             {connected.length} link{connected.length !== 1 ? 's' : ''}
           </span>
 
+          {report && (
+            <button onClick={() => setReportOpen(!reportOpen)} title="View sense check report" style={{
+              fontSize: 11, padding: '3px 9px', borderRadius: 99, fontWeight: 500, border: 'none',
+              background: report.verdict === 'accurate' ? 'var(--teal-50)' : report.verdict === 'minor_issues' ? 'var(--amber-50)' : 'var(--coral-50)',
+              color: report.verdict === 'accurate' ? 'var(--teal-800)' : report.verdict === 'minor_issues' ? 'var(--amber-800)' : 'var(--coral-800)',
+              cursor: 'pointer'
+            }}>
+              {report.verdict === 'accurate' ? '✓ Checked' : report.verdict === 'minor_issues' ? '⚠ Minor issues' : '✗ Issues found'}
+              {' · '}{new Date(report.checkedAt).toLocaleDateString()}
+            </button>
+          )}
+
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <button onClick={runSenseCheck} disabled={checking} title="Sense check this note against official documentation"
+              style={{ padding: '4px 10px', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'transparent', fontSize: 12, color: checking ? 'var(--text-tertiary)' : 'var(--purple-600)', cursor: checking ? 'wait' : 'pointer' }}>
+              <i className={`ti ${checking ? 'ti-loader-2' : 'ti-shield-check'}`} aria-hidden="true" />
+            </button>
             <button onClick={() => { setEditMode(!editMode); setEditTitle(note.title); setEditBody(note.body) }}
               style={{ padding: '4px 10px', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'transparent', fontSize: 12, color: 'var(--text-secondary)' }}>
               <i className={`ti ${editMode ? 'ti-x' : 'ti-edit'}`} aria-hidden="true" />
@@ -118,6 +159,80 @@ export function NoteView({ note, notes, sourceConfig, onUpdate, onAddCapture, on
           {note.body.split('\n\n').map((p, i) => (
             <p key={i} style={{ fontSize: 14, lineHeight: 1.85, color: 'var(--text-primary)', marginBottom: 14 }}>{p}</p>
           ))}
+        </div>
+      )}
+
+      {/* Sense check report */}
+      {checking && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', marginBottom: 20, borderRadius: 'var(--radius-md)', background: 'var(--purple-50)', border: '0.5px solid var(--purple-200)', fontSize: 13, color: 'var(--purple-800)' }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--purple-400)', animation: 'pulse 1s infinite' }} />
+          Checking your note against official documentation... this takes a few seconds
+          <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
+        </div>
+      )}
+
+      {report && reportOpen && !checking && (
+        <div style={{
+          marginBottom: 24, borderRadius: 'var(--radius-lg)', overflow: 'hidden',
+          border: `0.5px solid ${report.verdict === 'accurate' ? 'var(--teal-200)' : report.verdict === 'minor_issues' ? 'var(--amber-100)' : 'var(--coral-100)'}`
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px',
+            background: report.verdict === 'accurate' ? 'var(--teal-50)' : report.verdict === 'minor_issues' ? 'var(--amber-50)' : 'var(--coral-50)'
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: report.verdict === 'accurate' ? 'var(--teal-800)' : report.verdict === 'minor_issues' ? 'var(--amber-800)' : 'var(--coral-800)' }}>
+              <i className="ti ti-shield-check" aria-hidden="true" style={{ marginRight: 6 }} />
+              Sense check — {new Date(report.checkedAt).toLocaleString()}
+            </div>
+            <button onClick={() => setReportOpen(false)} style={{ border: 'none', background: 'transparent', fontSize: 14, color: 'var(--text-tertiary)', cursor: 'pointer' }}>
+              <i className="ti ti-x" aria-hidden="true" />
+            </button>
+          </div>
+
+          <div style={{ padding: '14px 16px', background: 'var(--bg-primary)' }}>
+            <p style={{ fontSize: 13, lineHeight: 1.75, color: 'var(--text-primary)', marginBottom: report.findings?.length ? 14 : 0 }}>
+              {report.summary}
+            </p>
+
+            {report.findings?.map((f, i) => (
+              <div key={i} style={{
+                padding: '10px 14px', marginBottom: 8, fontSize: 13, lineHeight: 1.7,
+                borderLeft: `3px solid ${f.status === 'accurate' ? 'var(--teal-400)' : f.status === 'incorrect' ? 'var(--coral-400)' : f.status === 'org_specific' ? 'var(--blue-400)' : 'var(--amber-200)'}`,
+                background: 'var(--bg-secondary)', borderRadius: '0 var(--radius-md) var(--radius-md) 0'
+              }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em',
+                    color: f.status === 'accurate' ? 'var(--teal-600)' : f.status === 'incorrect' ? 'var(--coral-400)' : f.status === 'org_specific' ? 'var(--blue-400)' : 'var(--amber-400)' }}>
+                    {f.status.replace('_', ' ')}
+                  </span>
+                  <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 99, background: 'var(--bg-tertiary)', color: 'var(--text-tertiary)' }}>
+                    {f.confidence === 'established' ? 'established concept' : f.confidence === 'verify_in_docs' ? 'verify in docs' : 'org-specific — cannot verify externally'}
+                  </span>
+                </div>
+                <div style={{ fontStyle: 'italic', color: 'var(--text-secondary)', marginBottom: 4 }}>"{f.claim}"</div>
+                <div style={{ color: 'var(--text-primary)' }}>{f.explanation}</div>
+              </div>
+            ))}
+
+            {report.references?.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>References</div>
+                {report.references.map((r, i) => (
+                  <a key={i} href={r.url} target="_blank" rel="noreferrer" style={{
+                    display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5,
+                    color: 'var(--blue-400)', textDecoration: 'none', marginBottom: 4
+                  }}>
+                    <i className="ti ti-external-link" aria-hidden="true" style={{ fontSize: 12, flexShrink: 0 }} />
+                    {r.title || r.url}
+                  </a>
+                ))}
+              </div>
+            )}
+
+            <p style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 12, lineHeight: 1.6 }}>
+              Read the findings, then edit your note yourself — correcting it in your own words is part of the learning. This check reduces error risk but isn't a guarantee; for version- or licence-specific claims, the linked docs are the source of truth.
+            </p>
+          </div>
         </div>
       )}
 
