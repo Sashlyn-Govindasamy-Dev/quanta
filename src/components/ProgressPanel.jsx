@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { getTopicColor, AVAILABLE_ICONS } from '../config.js'
 import { getRetentionPercent, isDue } from '../srs.js'
-import { importData } from '../db.js'
+import { importData, getSetting } from '../db.js'
 import { showToast } from './Toast.jsx'
 
 export function ProgressPanel({ notes, sourceConfig, customSources, onAddSource, onDeleteSource, onReload, autoBackup }) {
@@ -16,6 +16,42 @@ export function ProgressPanel({ notes, sourceConfig, customSources, onAddSource,
   const sourceCounts = notes.reduce((acc, n) => {
     acc[n.source] = (acc[n.source] || 0) + 1; return acc
   }, {})
+
+  // Quiz session history (for streak + recent activity)
+  const [quizSessions, setQuizSessions] = useState([])
+  useEffect(() => {
+    getSetting('quizSessions').then(s => setQuizSessions(s || []))
+  }, [notes])
+
+  const streak = (() => {
+    if (!quizSessions.length) return 0
+    const dates = new Set(quizSessions.map(s => s.date))
+    let count = 0
+    const d = new Date()
+    // Streak may end today or yesterday (today's session might not have happened yet)
+    if (!dates.has(d.toISOString().slice(0, 10))) d.setDate(d.getDate() - 1)
+    while (dates.has(d.toISOString().slice(0, 10))) {
+      count++
+      d.setDate(d.getDate() - 1)
+    }
+    return count
+  })()
+
+  // Weak spots: rank notes by combined risk signals — low quiz scores,
+  // overdue reviews, low retention, unresolved sense-check issues
+  const weakSpots = notes.map(n => {
+    const recent = (n.quizHistory || []).slice(-3)
+    const avgQuiz = recent.length ? recent.reduce((s, e) => s + e.score, 0) / recent.length : null
+    let risk = 0
+    const reasons = []
+    if (avgQuiz !== null && avgQuiz < 70) { risk += (70 - avgQuiz); reasons.push(`quiz avg ${Math.round(avgQuiz)}%`) }
+    if (isDue(n)) { risk += 20; reasons.push('review overdue') }
+    const ret = getRetentionPercent(n)
+    if (ret < 40) { risk += (40 - ret) / 2; reasons.push(`${ret}% retention`) }
+    if (n.senseCheck?.verdict === 'significant_issues') { risk += 25; reasons.push('sense check found issues') }
+    if (n.modified && n.senseCheck && n.modified > n.senseCheck.checkedAt) { risk += 5; reasons.push('edited since last check') }
+    return { note: n, risk, reasons }
+  }).filter(w => w.risk > 0).sort((a, b) => b.risk - a.risk).slice(0, 5)
 
   // New source form state
   const [showAddSource, setShowAddSource] = useState(false)
@@ -105,6 +141,65 @@ export function ProgressPanel({ notes, sourceConfig, customSources, onAddSource,
           )
         })}
       </div>
+
+      {/* Weak spots */}
+      {weakSpots.length > 0 && (
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 14 }}>
+            Weak spots — study these first
+          </div>
+          {weakSpots.map(({ note: n, reasons }) => {
+            const c = getTopicColor(n.topic)
+            return (
+              <div key={n.id} style={{
+                display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8,
+                padding: '10px 14px', borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-secondary)', border: '0.5px solid var(--border)',
+                borderLeft: `3px solid ${c.dot}`
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{n.title}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{n.topic} · {reasons.join(' · ')}</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Quiz activity */}
+      {quizSessions.length > 0 && (
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Quiz activity
+            </div>
+            {streak > 0 && (
+              <span style={{
+                fontSize: 11, padding: '3px 10px', borderRadius: 99, fontWeight: 500,
+                background: 'var(--amber-50)', color: 'var(--amber-800)'
+              }}>🔥 {streak}-day streak</span>
+            )}
+          </div>
+          {quizSessions.slice(-7).reverse().map(s => (
+            <div key={s.date} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+              <div style={{ width: 90, fontSize: 12, color: 'var(--text-secondary)', flexShrink: 0 }}>
+                {new Date(s.date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+              </div>
+              <div style={{ flex: 1, height: 8, borderRadius: 4, background: 'var(--bg-secondary)', overflow: 'hidden' }}>
+                <div style={{
+                  width: `${Math.round(s.totalScore / s.count)}%`, height: '100%', borderRadius: 4,
+                  background: (s.totalScore / s.count) >= 75 ? 'var(--teal-400)' : (s.totalScore / s.count) >= 50 ? 'var(--amber-200)' : 'var(--coral-400)',
+                  transition: 'width 0.5s ease'
+                }} />
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', width: 88, textAlign: 'right' }}>
+                {s.count} answered · {Math.round(s.totalScore / s.count)}%
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Sources */}
       <div style={{ marginBottom: 28 }}>
